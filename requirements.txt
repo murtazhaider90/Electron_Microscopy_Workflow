@@ -1,0 +1,17 @@
+# Core (required)
+ase>=3.23
+numpy
+
+# Simulation + image display (required to actually run/preview TEM images)
+abtem>=1.0
+matplotlib
+
+# System package (not pip): Tkinter is needed by ASE GUI itself.
+#   Debian/Ubuntu:  sudo apt install python3-tk
+#   Fedora:         sudo dnf install python3-tkinter
+#   conda:          tk is included with the standard Python
+
+# Optional: only needed for unusual 2DMatPedia records that the built-in
+# parser cannot read directly. Standard pymatgen-style structure dicts are
+# parsed WITHOUT it.
+# pymatgen
