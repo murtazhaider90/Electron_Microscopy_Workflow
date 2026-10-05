@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "abtem-ase-tem-tool"
+version = "1.4.0"
+description = "ASE Electron Microscopy Workbench — abTEM TEM + diffraction + sweep inside ASE GUI (modular package)"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "abTEM ASE TEM tool" }]
+keywords = ["TEM", "abTEM", "ASE", "electron microscopy", "diffraction", "multislice"]
+
+dependencies = [
+    "ase>=3.23",
+    "numpy",
+    "abtem>=1.0",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+pymatgen = ["pymatgen"]
+dev = ["pytest"]
+
+[project.scripts]
+abtem-ase-gui = "abtem_ase_workbench.launcher:main"
+
+[tool.setuptools]
+py-modules = ["abtem_tem", "abtem_tem_backend", "abtem_2d_database", "run_gui"]
+packages = ["abtem_ase_workbench"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: abTEM physics tests (need abTEM; small grids)",
+    "gui: Tk GUI smoke tests (need a display / Xvfb)",
+]
+testpaths = ["tests"]
