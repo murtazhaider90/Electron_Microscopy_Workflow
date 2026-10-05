@@ -1,0 +1,21 @@
+--- a/ase/gui/gui.py	2026-07-01 19:07:07.847188977 +0000
++++ b/ase/gui/gui.py	2026-07-01 19:07:17.077294514 +0000
+@@ -415,6 +415,10 @@
+         bandpath = cell.bandpath(npoints=0)
+         return self.pipe('reciprocal', bandpath)
+ 
++    def abtem_tem_window(self, key=None):
++        from ase.gui.abtem_tem import ABTEMSimulation
++        return ABTEMSimulation(self)
++
+     def open(self, button=None, filename=None):
+         chooser = ui.ASEFileChooser(self.window.win)
+ 
+@@ -667,6 +671,7 @@
+               M(_('NE_B plot'), self.neb),
+               M(_('B_ulk modulus'), self.bulk_modulus),
+               M(_('Reciprocal space ...'), self.reciprocal),
++              M(_('Electron Microscopy Workbench'), self.abtem_tem_window),
+               M(_('Wrap atoms'), self.wrap_atoms, 'Ctrl+W')]),
+ 
+             # TRANSLATORS: Set up (i.e. build) surfaces, nanoparticles, ...
