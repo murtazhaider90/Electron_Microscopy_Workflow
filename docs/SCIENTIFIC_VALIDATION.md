@@ -5,6 +5,20 @@ Reviewed 2026-10-08 against task baseline `0c2d2cf` (included in main
 GUI design, and all pre-existing assertions are unchanged. Confirmed defects
 are represented by ordinary failing regression tests, not skips or xfails.
 
+## Resolution update (2026-10-08)
+
+The following audit text and its regression tests preserve the original findings.
+Production fixes and the supported/rejected scientific policies are now detailed
+in [SCIENTIFIC_RESOLUTION.md](SCIENTIFIC_RESOLUTION.md). QA-01 through QA-08
+have implementation changes, with a conservative exact-periodic limitation.
+The unchanged independent QA suite now has 174 passes and four visible
+contract conflicts; the complete slow/GUI suite has 285 passes, six failures
+and one existing CIF skip. Two failures are original baseline success-path
+fixtures incompatible with the stricter geometry policy. All 46 added
+resolution checks pass. This is **not an all-green validation result**.
+No QA or baseline assertion was changed or suppressed. Human review is required
+for the six documented test/policy conflicts before treating this as merge-ready.
+
 ## Result
 
 The exact matrix adapter preserves species-labelled geometry, handedness, cell
