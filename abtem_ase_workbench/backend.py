@@ -110,6 +110,164 @@ def _abtem_ctf_supported_keys():
     return supported
 
 
+def _validate_dose(dose):
+    try:
+        if isinstance(dose, (bool, np.bool_)) or np.ndim(dose) != 0:
+            raise ValueError("Dose must be a scalar number.")
+        value = float(dose)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Electron dose must be finite and nonnegative (electrons/Å²).") from exc
+    if not np.isfinite(value) or value < 0:
+        raise ValueError("Electron dose must be finite and nonnegative (electrons/Å²).")
+    return value
+
+
+def _positive_integer(value, name):
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        valid = np.ndim(value) == 0 and np.isfinite(value) and int(value) == value and value > 0
+    except (TypeError, ValueError, OverflowError):
+        valid = False
+    if not valid:
+        raise ValueError(f"{name} must be a positive integer.")
+    return int(value)
+
+
+def _check_finite_box(work):
+    """Reject insufficient vacuum; never resize or tile implicitly."""
+    if np.any(work.pbc):
+        return
+    cell = np.asarray(work.cell)
+    # The physical rotation helper may return a skewed cell when explicitly
+    # requested. Only the calculation boundary requires an axis-aligned box.
+    if not np.allclose(cell, np.diag(np.diag(cell)), atol=1e-9, rtol=0) or np.any(np.diag(cell) <= 0):
+        raise ValueError("Finite specimens require a positive axis-aligned calculation box; keep rotate_cell=False and add vacuum.")
+    if not np.all(np.isfinite(work.positions)):
+        raise ValueError("Specimen positions must be finite.")
+    if np.any(work.positions < -1e-9) or np.any(work.positions > np.diag(cell) + 1e-9):
+        raise ValueError("Oriented finite specimen exceeds its calculation box. Expand the vacuum box before simulation.")
+
+
+def _prepare_potential(work, resolution):
+    """Use abTEM/ASE lattice cuts, but never permit affine deformation.
+
+    Exact here means Cartesian equality within 1e-8 Å numerical tolerance.
+    A bounded abTEM commensurate-cell search may conservatively reject a case
+    that would need a larger supercell. No approximate orientation is accepted.
+    """
+    work = work.copy()
+    cell = np.asarray(work.cell).copy()
+    pbc = work.pbc.copy()
+    if not np.all(np.isfinite(cell)) or not np.all(np.isfinite(work.positions)) or abs(np.linalg.det(cell)) < 1e-12:
+        raise ValueError("Specimen requires finite positions and a nonzero calculation cell.")
+    finite = not np.any(pbc)
+    kind = "finite" if finite else ("3d_periodic" if np.all(pbc) else "2d_periodic")
+    if finite:
+        _check_finite_box(work)
+        candidate = work.copy()
+        method = "finite_axis_aligned_box"
+    else:
+        if np.sum(pbc) != 3:
+            # Current supported slab convention is periodic xy, vacuum z.
+            if not np.array_equal(pbc, [True, True, False]) or not np.allclose(cell[:2, 2], 0, atol=1e-8, rtol=0) or not np.allclose(cell[2, :2], 0, atol=1e-8, rtol=0) or cell[2, 2] <= 0:
+                raise ValueError("Periodic slab orientation is not exactly representable: periodic directions must lie in xy and the nonperiodic vacuum vector along z. Use an aligned slab or an explicitly finite specimen.")
+        # allow_transform=False leaves the integer ASE cut unstrained. Test
+        # the resulting CELL, not abTEM's optional affine/Euler readout.
+        candidate = abtem.orthogonalize_cell(work.copy(), allow_transform=False,
+                                             return_transform_matrix=True)
+        if isinstance(candidate, tuple):
+            candidate = candidate[0]
+        diagonal = np.diag(np.diag(candidate.cell.array))
+        if not np.allclose(candidate.cell.array, diagonal, atol=1e-8, rtol=0) or np.any(np.diag(diagonal) <= 0):
+            raise ValueError("Periodic orientation is not exactly representable by an axis-aligned commensurate abTEM cell within its bounded search. Simulation blocked to prevent affine strain; choose an exactly commensurate orientation or an explicitly finite specimen.")
+        lattice = candidate.cell.array @ np.linalg.inv(cell)
+        integer_lattice = np.rint(lattice)
+        if not np.allclose(integer_lattice @ cell, candidate.cell.array, atol=1e-8, rtol=0):
+            raise ValueError("abTEM cell cut is not an exact integer supercell of the oriented lattice; simulation blocked.")
+        if not np.all(pbc) and (not np.array_equal(integer_lattice[2], [0, 0, 1]) or np.any(integer_lattice[:2, 2])):
+            raise ValueError("abTEM preparation would replicate the nonperiodic vacuum direction; simulation blocked.")
+        if len(candidate) != round(abs(np.linalg.det(integer_lattice))) * len(work):
+            raise ValueError("abTEM commensurate cut changed the expected atom count; simulation blocked.")
+        # Only round numerical zero terms; never scale positions.
+        candidate.set_cell(diagonal, scale_atoms=False)
+        candidate.set_pbc(pbc)
+        method = "abtem_unstrained_commensurate_cut"
+
+    potential = abtem.Potential(atoms=candidate.copy(), gpts=resolution,
+                                periodic=not finite, parametrization="lobato",
+                                projection="infinite", slice_thickness=1,
+                                plane="xy", origin=(0.0, 0.0, 0.0))
+    prepared = potential.get_transformed_atoms().copy()
+    # Once given a positive diagonal cell, abTEM must have no reason to
+    # transform it. Guard this engine boundary, including future API changes.
+    if not np.allclose(prepared.cell.array, candidate.cell.array, atol=1e-8, rtol=0) or not np.array_equal(prepared.numbers, candidate.numbers) or not np.allclose(prepared.positions, candidate.positions, atol=1e-8, rtol=0) or not np.array_equal(prepared.pbc, pbc):
+        raise ValueError("abTEM preparation changed the validated specimen geometry; simulation blocked.")
+    changed = len(prepared) != len(work) or not np.allclose(prepared.cell.array, cell, atol=1e-8, rtol=0)
+    provenance = {
+        "specimen_type": kind,
+        "method": method,
+        "orthogonalization_occurred": bool(changed),
+        "preparation_occurred": not finite,
+        "exact_rigid_geometry_preserved": True,
+        "oriented_cell_angstrom": cell.tolist(),
+        "prepared_cell_angstrom": prepared.cell.array.tolist(),
+        "prepared_atom_count": len(prepared),
+        "source_oriented_atom_count": len(work),
+        "pbc": pbc.tolist(),
+        "potential_periodic": bool(potential.periodic),
+        "engine_settings": {"parametrization": "lobato", "projection": "infinite",
+                            "plane": "xy", "origin_angstrom": [0.0, 0.0, 0.0],
+                            "device": str(potential.device)},
+        "slice_thickness_angstrom": list(potential.slice_thickness),
+        "real_space_grid_shape_xy": list(potential.gpts),
+        "real_space_grid_sampling_angstrom": list(potential.sampling),
+        "geometry_tolerance_angstrom": 1e-8,
+        "commensurate_search_max_repetitions": 5 if not finite else None,
+    }
+    return potential, provenance
+
+
+def _grid_metadata(measurement, img, crop_origin, requested_sampling, reciprocal=False):
+    spacing = [float(v) for v in measurement.sampling]
+    raw_shape = [int(v) for v in measurement.array.shape]
+    # Raw crop dimensions remain x,y even for the subsequent screen transpose.
+    crop_shape = [min(raw_shape[i] - crop_origin[i], img.shape[i]) for i in range(2)]
+    result = {
+        "requested_sampling_angstrom": float(requested_sampling),
+        "sampling_semantics": "legacy_requested_real_space_sampling",
+        "grid_control": "potential_gpts",
+        "measurement_shape_xy": raw_shape,
+        "crop_origin_xy_pixels": list(crop_origin),
+        "crop_shape_xy": crop_shape,
+        "measurement_axis_order": ["kx", "ky"] if reciprocal else ["x", "y"],
+        "display_normalization": "min_max_to_0_1",
+    }
+    if reciprocal:
+        result.update(reciprocal_sampling_inverse_angstrom=spacing,
+                      angular_sampling_mrad=[float(v) for v in measurement.angular_sampling],
+                      reciprocal_crop_extent_inverse_angstrom=[crop_shape[i]*spacing[i] for i in range(2)],
+                      reciprocal_crop_offset_inverse_angstrom=[float(measurement.offset[i])+crop_origin[i]*spacing[i] for i in range(2)])
+    else:
+        result.update(actual_sampling_angstrom=spacing,
+                      pixel_area_angstrom2=float(np.prod(spacing)),
+                      field_of_view_angstrom=[crop_shape[i]*spacing[i] for i in range(2)])
+    return result
+
+
+def _add_annotations(metadata, extra_metadata):
+    if extra_metadata:
+        annotations = dict(extra_metadata)
+        metadata["user_metadata"] = annotations
+        # Preserve known legacy descriptive GUI fields only. Physical PBC,
+        # cell, orientation/settings remain authoritative elsewhere.
+        descriptive = {"orientation_source", "zone_axis_uvw", "plane_hkl",
+                       "nearest_zone_axis", "structure_source", "structure_database_id",
+                       "structure_formula"}
+        for key in descriptive & annotations.keys():
+            metadata[key] = annotations[key]
+
+
 def poisson_noise(measurement, dose, rng):
     """Apply physically correct Poisson shot noise to an abTEM image measurement.
 
@@ -118,6 +276,7 @@ def poisson_noise(measurement, dose, rng):
     negative lambda). Returns a plain float numpy array rather than mutating in
     place, so it is safe even when the backing array is read-only.
     """
+    dose = _validate_dose(dose)
     sx, sy = measurement.sampling
     pixel_area = float(sx) * float(sy)
     expected = np.asarray(measurement.array, dtype=float) * float(dose) * pixel_area
@@ -219,7 +378,7 @@ def apply_view_rotation(atoms, view_axes, recenter=True, rotate_cell=None):
     only policy branch concerns the simulation cell:
 
     * finite particle (``rotate_cell=False``): transform atoms only, preserve
-      the original vacuum box/PBC, then recenter;
+      the original vacuum box/PBC, then recenter and reject insufficient boxes;
     * periodic crystal/slab (``rotate_cell=True``): transform both atoms and
       lattice vectors by the same matrix.
 
@@ -247,10 +406,9 @@ def apply_view_rotation(atoms, view_axes, recenter=True, rotate_cell=None):
         work.set_pbc(original_pbc)
 
     if recenter:
-        try:
-            work.center()
-        except Exception:
-            pass
+        work.center()
+        if not rotate_cell and not np.any(work.pbc):
+            _check_finite_box(work)
     return work
 
 
@@ -305,10 +463,9 @@ def apply_xyz_rotation(atoms, x_deg, y_deg, z_deg, recenter=True,
         work.set_pbc(original_pbc)
 
     if recenter:
-        try:
-            work.center()
-        except Exception:
-            pass
+        work.center()
+        if not rotate_cell and not np.any(work.pbc):
+            _check_finite_box(work)
     return work
 
 
@@ -349,6 +506,9 @@ def simulate_tem_from_atoms(
     Returns ``(image_array, metadata)`` -- a normalized [0, 1] grayscale image
     and a JSON-serializable metadata dict. The input ``atoms`` is never mutated.
     """
+    image_size = _positive_integer(image_size, "image_size")
+    wave_resolution = _positive_integer(wave_resolution, "wave_resolution")
+    dose = _validate_dose(dose)
     _load_abtem()  # lazy: first physics request pays the abTEM import cost
     if atoms is None or len(atoms) == 0:
         raise ValueError("No atoms to simulate.")
@@ -394,25 +554,16 @@ def simulate_tem_from_atoms(
     else:
         work = atoms.copy()
 
+    if np.any(atoms.pbc) and rotation_applied and not resolved_rotate_cell:
+        raise ValueError("Periodic specimen rotations must rotate the lattice with the atoms; use rotate_cell=True.")
+
     # 3) PlaneWave (sampling only -> avoids overspecified-grid warning).
     wave = abtem.PlaneWave(energy=float(voltage), sampling=float(sampling))
 
 
-    # 4/5) Potential (gpts only) + multislice, with orthogonalize fallback for
-    #      non-axis-aligned cells (mirrors ASE-GUI/abTEM orthogonal-box needs).
-    orthogonalized = False
-
-    def _build_and_propagate(a):
-        potential = abtem.Potential(atoms=a, gpts=int(wave_resolution))
-        return wave.multislice(potential)
-
-    try:
-        exit_wave = _build_and_propagate(work)
-    except Exception:
-        result = abtem.orthogonalize_cell(work)
-        work = result[0] if isinstance(result, tuple) else result
-        orthogonalized = True
-        exit_wave = _build_and_propagate(work)
+    potential, preparation = _prepare_potential(work, wave_resolution)
+    orthogonalized = preparation["orthogonalization_occurred"]
+    exit_wave = wave.multislice(potential)
 
     # 6) CTF -- pass only keys the installed abTEM actually supports.
     supported = _abtem_ctf_supported_keys()
@@ -445,12 +596,8 @@ def simulate_tem_from_atoms(
         intensity = intensity.compute()
 
     # 8) Poisson noise from electron dose + pixel area.
-    noise_applied = False
-    try:
-        noisy_arr = poisson_noise(intensity, dose, np.random.default_rng(rng_seed))
-        noise_applied = True
-    except Exception:
-        noisy_arr = np.asarray(intensity.array, dtype=float)
+    noisy_arr = poisson_noise(intensity, dose, np.random.default_rng(rng_seed))
+    noise_applied = True  # zero dose intentionally yields zero electron counts
 
     # 9) Crop to image_size.
     n = int(image_size)
@@ -458,6 +605,8 @@ def simulate_tem_from_atoms(
 
     # 10) Safe normalization.
     img = safe_normalize(img)
+
+    grid_metadata = _grid_metadata(intensity, img, (0, 0), sampling)
 
     # abTEM's array is x-first, while ordinary image files/matplotlib are
     # row(y)-first.  For exact ASE-GUI driven runs, return/save a standard
@@ -481,10 +630,14 @@ def simulate_tem_from_atoms(
         "rotation_mode": rotation_mode,
         "rotation_applied": rotation_applied,
         "orthogonalized": orthogonalized,
+        "preparation": preparation,
+        "structure_pbc": atoms.pbc.tolist(),
+        "source_cell_angstrom": atoms.cell.array.tolist(),
         "accelerating_voltage": float(voltage),
         "defocus": float(defocus),
         "sampling": float(sampling),
         "electron_dose": float(dose),
+        "electron_dose_units": "electrons/angstrom^2",
         "image_size": int(image_size),
         "wave_resolution": int(wave_resolution),
         "ctf_parameters": {
@@ -508,13 +661,10 @@ def simulate_tem_from_atoms(
         "ase_version": ASE_VERSION,
     }
 
-    # Optional caller-supplied orientation/provenance fields (no physics; just
-    # merged into the metadata dict so they land in the JSON sidecar too).
-    if extra_metadata:
-        try:
-            metadata.update(dict(extra_metadata))
-        except Exception:
-            pass
+    metadata.update(grid_metadata)
+    metadata["returned_array_shape"] = list(img.shape)
+    metadata["returned_axis_order"] = ["y_down", "x"] if view_axes is not None else ["x", "y"]
+    _add_annotations(metadata, extra_metadata)
 
     # 11) Save PNG + JSON sidecar if an output path was given.
     if output_file:
@@ -567,6 +717,8 @@ def simulate_diffraction_from_atoms(
     grid antialiasing cutoff). ``log_scale`` compresses the large dynamic range
     for display.
     """
+    image_size = _positive_integer(image_size, "image_size")
+    wave_resolution = _positive_integer(wave_resolution, "wave_resolution")
     _load_abtem()  # lazy: first physics request pays the abTEM import cost
     if atoms is None or len(atoms) == 0:
         raise ValueError("No atoms to simulate.")
@@ -609,20 +761,13 @@ def simulate_diffraction_from_atoms(
     else:
         work = atoms.copy()
 
+    if np.any(atoms.pbc) and rotation_applied and not resolved_rotate_cell:
+        raise ValueError("Periodic specimen rotations must rotate the lattice with the atoms; use rotate_cell=True.")
+
     wave = abtem.PlaneWave(energy=float(voltage), sampling=float(sampling))
-    orthogonalized = False
-
-    def _build(a):
-        potential = abtem.Potential(atoms=a, gpts=int(wave_resolution))
-        return wave.multislice(potential)
-
-    try:
-        exit_wave = _build(work)
-    except Exception:
-        result = abtem.orthogonalize_cell(work)
-        work = result[0] if isinstance(result, tuple) else result
-        orthogonalized = True
-        exit_wave = _build(work)
+    potential, preparation = _prepare_potential(work, wave_resolution)
+    orthogonalized = preparation["orthogonalization_occurred"]
+    exit_wave = wave.multislice(potential)
 
     ma = 'cutoff' if max_angle is None else float(max_angle)  # abTEM: mrad
     dp = exit_wave.diffraction_patterns(max_angle=ma,
@@ -633,7 +778,10 @@ def simulate_diffraction_from_atoms(
     if log_scale:
         arr = np.log1p(np.clip(arr, 0.0, None))
 
+    crop_origin = tuple(max(0, (size - image_size)//2) for size in arr.shape)
     img = _center_crop(arr, int(image_size))
+    grid_metadata = _grid_metadata(dp, img, crop_origin, sampling, reciprocal=True)
+    grid_metadata["actual_real_space_sampling_angstrom"] = [float(v) for v in potential.sampling]
     img = safe_normalize(img)
     image_presentation = "abtem_raw_array"
     if view_axes is not None:
@@ -653,6 +801,9 @@ def simulate_diffraction_from_atoms(
         "rotation_mode": rotation_mode,
         "rotation_applied": rotation_applied,
         "orthogonalized": orthogonalized,
+        "preparation": preparation,
+        "structure_pbc": atoms.pbc.tolist(),
+        "source_cell_angstrom": atoms.cell.array.tolist(),
         "accelerating_voltage": float(voltage),
         "sampling": float(sampling),
         "wave_resolution": int(wave_resolution),
@@ -665,11 +816,10 @@ def simulate_diffraction_from_atoms(
         "abtem_version": ABTEM_VERSION,
         "ase_version": ASE_VERSION,
     }
-    if extra_metadata:
-        try:
-            metadata.update(dict(extra_metadata))
-        except Exception:
-            pass
+    metadata.update(grid_metadata)
+    metadata["returned_array_shape"] = list(img.shape)
+    metadata["returned_axis_order"] = ["ky_down", "kx"] if view_axes is not None else ["kx", "ky"]
+    _add_annotations(metadata, extra_metadata)
 
     if output_file:
         save_gray_png(img, output_file)
