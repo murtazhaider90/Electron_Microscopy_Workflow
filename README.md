@@ -204,3 +204,36 @@ environment, installs the Workbench + PyInstaller, and writes:
 
 After that, launching the Workbench needs no PowerShell. You can also drag a
 CIF/XYZ/POSCAR/EXTXYZ file onto the EXE to open it in ASE.
+
+## Next-generation Qt preview
+
+The independent `emw_qt` package provides the initial PySide6 / Qt 6 desktop
+shell. The existing `abtem-ase-gui` / ASE Tk application remains available.
+For development, use Python 3.9+ and install `pip install -e '.[qt]'`, then
+launch `emw-qt` (or `python -m emw_qt`). Normal use requires no Python editing.
+This preview is not yet the Windows installer; the existing packaging remains
+unchanged.
+
+The prominent workflow is **Open → Orient → Preset → Simulate**. It includes
+specimen selection, a 3D viewer placeholder, microscope preset selection,
+Advanced disclosure, contextual help, TEM/Diffraction/Compare/Metadata tabs,
+status/progress, cancellation, friendly error messages, light/dark themes and
+persistent window/layout/settings state. File selection records a source only;
+ASE parsing, VisPy rendering and abTEM integration are pending. The Simulate
+demo action exercises background jobs and produces explicitly labelled demo
+metadata, never scientific images or diffraction patterns.
+
+`emw_qt.jobs.JobController.start(operation)` runs a callable on a Qt thread pool.
+The callable receives a cancellation event and a `(percent, message)` progress
+callback, returns a result and may raise `Cancelled` at a safe checkpoint.
+Workers must not access widgets. Duplicate submissions are rejected. Closing
+while busy requests cancellation and keeps the window alive until the job stops;
+close again when idle. Diagnostics go to logging; dialogs show a friendly message.
+Future science adapters must use existing documented backend APIs with a copied
+ASE specimen and the viewer's exact canonical matrix, without reconstructing
+orientation from angles or changing physics. `ViewerPlaceholder` marks the
+integration seam; it currently performs no orientation calculation.
+
+For Qt development tests install `pip install -e '.[qt-dev]'` and run
+`QT_QPA_PLATFORM=offscreen pytest tests/test_qt_gui.py --run-gui`. For the complete
+scientific, Tk and Qt suite use `xvfb-run -a pytest --run-slow --run-gui`.
