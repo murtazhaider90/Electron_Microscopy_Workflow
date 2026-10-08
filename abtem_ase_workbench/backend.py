@@ -26,6 +26,12 @@ import os
 import json
 import inspect
 import datetime
+import importlib
+import importlib.util
+try:
+    from importlib import metadata as _importlib_metadata
+except Exception:  # pragma: no cover
+    _importlib_metadata = None
 
 import numpy as np
 
@@ -37,13 +43,41 @@ try:
 except Exception:
     ASE_VERSION = None
 
+# IMPORTANT FOR GUI STARTUP SPEED:
+# Do not import abTEM at module import time. Importing the full scientific stack
+# (abTEM/dask/numba/scipy/...) can dominate Windows/PyInstaller startup.  We
+# only detect whether the package exists here, then import it on the first real
+# simulation request.
+abtem = None
 try:
-    import abtem
-    HAVE_ABTEM = True
-    ABTEM_VERSION = getattr(abtem, "__version__", None)
+    HAVE_ABTEM = importlib.util.find_spec("abtem") is not None
 except Exception:
     HAVE_ABTEM = False
+try:
+    ABTEM_VERSION = (_importlib_metadata.version("abtem")
+                     if HAVE_ABTEM and _importlib_metadata is not None else None)
+except Exception:
     ABTEM_VERSION = None
+
+
+def _load_abtem():
+    """Import abTEM lazily on first simulation, not when the GUI starts."""
+    global abtem, HAVE_ABTEM, ABTEM_VERSION
+    if abtem is not None:
+        return abtem
+    if not HAVE_ABTEM:
+        raise RuntimeError(
+            "abTEM is not installed. Install it with `pip install abtem`."
+        )
+    try:
+        abtem = importlib.import_module("abtem")
+    except Exception as exc:
+        HAVE_ABTEM = False
+        raise RuntimeError(
+            "abTEM is installed but could not be imported: {}".format(exc)
+        ) from exc
+    ABTEM_VERSION = getattr(abtem, "__version__", ABTEM_VERSION)
+    return abtem
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +91,7 @@ def _abtem_ctf_supported_keys():
     silently ignored. We filter against this set and report anything dropped
     in the metadata instead of pretending it was applied.
     """
+    _load_abtem()
     supported = set()
     try:
         params = inspect.signature(abtem.CTF.__init__).parameters
@@ -314,11 +349,7 @@ def simulate_tem_from_atoms(
     Returns ``(image_array, metadata)`` -- a normalized [0, 1] grayscale image
     and a JSON-serializable metadata dict. The input ``atoms`` is never mutated.
     """
-    if not HAVE_ABTEM:
-        raise RuntimeError(
-            "abTEM is not installed, so a TEM image cannot be simulated. "
-            "Install it with `pip install abtem` to enable this feature."
-        )
+    _load_abtem()  # lazy: first physics request pays the abTEM import cost
     if atoms is None or len(atoms) == 0:
         raise ValueError("No atoms to simulate.")
 
@@ -536,10 +567,7 @@ def simulate_diffraction_from_atoms(
     grid antialiasing cutoff). ``log_scale`` compresses the large dynamic range
     for display.
     """
-    if not HAVE_ABTEM:
-        raise RuntimeError(
-            "abTEM is not installed, so a diffraction pattern cannot be "
-            "computed. Install it with `pip install abtem`.")
+    _load_abtem()  # lazy: first physics request pays the abTEM import cost
     if atoms is None or len(atoms) == 0:
         raise ValueError("No atoms to simulate.")
 
