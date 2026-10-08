@@ -191,16 +191,12 @@ Version 1.5 — exact-view adapter + Windows executable packaging
 
 ---
 
-## Windows executable (no PowerShell needed)
+## Windows distribution
 
-The project includes a PyInstaller build for Windows. The distributed app is a
-portable folder: keep the folder together and double-click
-`ElectronMicroscopyWorkbench.exe`.
+The Windows release path uses `ElectronMicroscopyWorkbench-Setup.exe`, a normal
+per-user installer with a Start Menu entry, optional Desktop shortcut and uninstall
+entry. End users need no Python or terminal. The PySide6 launch window currently
+opens the existing ASE scientific workbench.
 
-To build it locally, double-click `build_windows_exe.bat`. It creates a build
-environment, installs the Workbench + PyInstaller, and writes:
-
-`dist\\ElectronMicroscopyWorkbench\\ElectronMicroscopyWorkbench.exe`
-
-After that, launching the Workbench needs no PowerShell. You can also drag a
-CIF/XYZ/POSCAR/EXTXYZ file onto the EXE to open it in ASE.
+See [Windows distribution](docs/WINDOWS_DISTRIBUTION.md) for build instructions,
+verification, diagnostics and release limitations.
