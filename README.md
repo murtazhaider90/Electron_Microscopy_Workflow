@@ -186,4 +186,21 @@ For backwards compatibility, `pre_rotation=(x, y, z)` and
 `apply_xyz_rotation(...)` still work for explicit Euler-angle scripts, but the
 GUI no longer uses them as its simulation orientation source.
 
-Version 1.4 — Exact ASE-view orientation adapter
+Version 1.5 — exact-view adapter + Windows executable packaging
+
+
+---
+
+## Windows executable (no PowerShell needed)
+
+The project includes a PyInstaller build for Windows. The distributed app is a
+portable folder: keep the folder together and double-click
+`ElectronMicroscopyWorkbench.exe`.
+
+To build it locally, double-click `build_windows_exe.bat`. It creates a build
+environment, installs the Workbench + PyInstaller, and writes:
+
+`dist\\ElectronMicroscopyWorkbench\\ElectronMicroscopyWorkbench.exe`
+
+After that, launching the Workbench needs no PowerShell. You can also drag a
+CIF/XYZ/POSCAR/EXTXYZ file onto the EXE to open it in ASE.
