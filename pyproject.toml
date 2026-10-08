@@ -22,13 +22,15 @@ dependencies = [
 [project.optional-dependencies]
 pymatgen = ["pymatgen"]
 dev = ["pytest"]
+qt = ["PySide6>=6.6; python_version >= '3.9'", "vispy>=0.14"]
 
 [project.scripts]
+abtem-specimen = "abtem_ase_workbench.specimen.widget:main"
 abtem-ase-gui = "abtem_ase_workbench.launcher:main"
 
 [tool.setuptools]
 py-modules = ["abtem_tem", "abtem_tem_backend", "abtem_2d_database", "run_gui"]
-packages = ["abtem_ase_workbench"]
+packages = ["abtem_ase_workbench", "abtem_ase_workbench.specimen"]
 
 [tool.pytest.ini_options]
 markers = [
