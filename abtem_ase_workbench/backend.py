@@ -63,12 +63,12 @@ except Exception:
 def _load_abtem():
     """Import abTEM lazily on first simulation, not when the GUI starts."""
     global abtem, HAVE_ABTEM, ABTEM_VERSION
-    if abtem is not None:
-        return abtem
     if not HAVE_ABTEM:
         raise RuntimeError(
             "abTEM is not installed. Install it with `pip install abtem`."
         )
+    if abtem is not None:
+        return abtem
     try:
         abtem = importlib.import_module("abtem")
     except Exception as exc:
