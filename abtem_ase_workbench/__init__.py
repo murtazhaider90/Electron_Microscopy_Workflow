@@ -30,7 +30,7 @@ from .backend import (
     ASE_VERSION,
 )
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 __all__ = [
     "simulate_tem_from_atoms",
