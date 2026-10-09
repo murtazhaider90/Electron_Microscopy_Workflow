@@ -204,3 +204,12 @@ environment, installs the Workbench + PyInstaller, and writes:
 
 After that, launching the Workbench needs no PowerShell. You can also drag a
 CIF/XYZ/POSCAR/EXTXYZ file onto the EXE to open it in ASE.
+
+### Optional Qt specimen editor
+
+The isolated PySide6/VisPy specimen editor is available with `pip install -e
+'.[qt]'` and the `abtem-specimen` launcher. It retains ASE Atoms and hands the
+exact displayed orientation matrix to the existing backend. See
+[specimen subsystem design and usage](docs/specimen-view.md) for supported editing,
+builders, renderer evaluation and test instructions. The legacy Tk GUI remains
+available through its existing launcher.
