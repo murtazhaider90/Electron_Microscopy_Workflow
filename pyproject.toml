@@ -22,13 +22,16 @@ dependencies = [
 [project.optional-dependencies]
 pymatgen = ["pymatgen"]
 dev = ["pytest"]
+qt = ["PySide6>=6.5"]
+qt-dev = ["PySide6>=6.5", "pytest-qt>=4.4"]
 
 [project.scripts]
+emw-qt = "emw_qt.app:main"
 abtem-ase-gui = "abtem_ase_workbench.launcher:main"
 
 [tool.setuptools]
 py-modules = ["abtem_tem", "abtem_tem_backend", "abtem_2d_database", "run_gui"]
-packages = ["abtem_ase_workbench"]
+packages = ["abtem_ase_workbench", "emw_qt"]
 
 [tool.pytest.ini_options]
 markers = [
