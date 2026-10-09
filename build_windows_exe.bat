@@ -3,21 +3,21 @@ setlocal
 cd /d "%~dp0"
 
 echo ============================================================
-echo   Electron Microscopy Workbench - Windows EXE builder
+echo   Electron Microscopy Workbench - Developer portable EXE builder
 echo ============================================================
 echo.
 
 where py >nul 2>nul
 if errorlevel 1 (
   echo ERROR: Python launcher "py" was not found.
-  echo Install Python 3.11 or 3.12 from python.org, then run this file again.
+  echo Install Python 3.11 from python.org, then run this file again.
   pause
   exit /b 1
 )
 
 if not exist .build-venv (
   echo [1/5] Creating build environment...
-  py -3 -m venv .build-venv
+  py -3.11 -m venv .build-venv
   if errorlevel 1 goto :fail
 ) else (
   echo [1/5] Build environment already exists.
@@ -31,7 +31,7 @@ python -m pip install --upgrade pip
 if errorlevel 1 goto :fail
 
 echo [3/5] Installing Workbench + PyInstaller...
-pip install . pyinstaller
+python -m pip install -c packaging/windows/constraints.txt ".[desktop,windows-build]"
 if errorlevel 1 goto :fail
 
 echo [4/5] Building portable Windows application...
