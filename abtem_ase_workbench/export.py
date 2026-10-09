@@ -27,6 +27,8 @@ img, meta = simulate_tem_from_atoms(
     astigmatism={ast}, astigmatism_angle={asta},
     coma={coma}, coma_angle={comaa},
     focal_spread={fs}, angular_spread={angs},
+    rng_seed={rng_seed}, gaussian_spread={gaussian_spread},
+    rotation_angle={rotation_angle}, rotation_axis={rotation_axis!r},
 )
 '''
 
@@ -35,7 +37,8 @@ def build_repro_script(params):
     """Return a standalone Python script string for the given ``params`` dict.
 
     Expected keys match the GUI field names: view_axes, rot, rc, volt, defocus, sampling,
-    dose, isize, wres, cs, c5, ast, asta, coma, comaa, fs, angs. Missing keys
+    dose, isize, wres, cs, c5, ast, asta, coma, comaa, fs, angs; also rng_seed,
+    gaussian_spread and legacy rotation_angle/rotation_axis. Missing keys
     default to zero/sensible values so a partial dict still produces a valid
     file (the user then edits before running it).
     """
@@ -43,7 +46,8 @@ def build_repro_script(params):
                     volt=80000.0, defocus=-3.0,
                     sampling=0.05, dose=50000.0, isize=512, wres=512,
                     cs=0.0, c5=0.0, ast=0.5, asta=0.0, coma=5.0, comaa=0.0,
-                    fs=8.0, angs=1.2e-3)
+                    fs=8.0, angs=1.2e-3, rng_seed=12345, gaussian_spread=None,
+                    rotation_angle=0.0, rotation_axis="z")
     defaults.update(params or {})
     return SCRIPT_TEMPLATE.format(**defaults)
 

@@ -7,15 +7,14 @@ import pytest
 @pytest.mark.slow
 def test_image_metadata_schema(si_bulk, tmp_path):
     from abtem_tem_backend import simulate_tem_from_atoms
-    from ase.utils import rotate
     out = str(tmp_path / "img.png")
-    axes = rotate("10x,5y,0z")
+    axes = np.eye(3)
     img, meta = simulate_tem_from_atoms(
         si_bulk, output_file=out, view_axes=axes,
         image_size=48, wave_resolution=48, sampling=0.18,
         extra_metadata={
-            "orientation_source": "zone_axis", "zone_axis_uvw": [1, 1, 0],
-            "plane_hkl": None, "nearest_zone_axis": [1, 1, 0],
+            "orientation_source": "zone_axis", "zone_axis_uvw": [0, 0, 1],
+            "plane_hkl": None, "nearest_zone_axis": [0, 0, 1],
             "structure_source": "local_file", "structure_database_id": "x",
             "structure_formula": "Si8", "structure_pbc": [True, True, True]})
     required = ["rotation_mode", "rotate_cell", "xyz_rotation",
@@ -53,3 +52,20 @@ def test_diffraction_metadata_mode(si_thick, tmp_path):
         assert k in meta
     assert (tmp_path / "diff.json").exists()
     assert np.isfinite(img).all()
+
+
+@pytest.mark.slow
+def test_metadata_unsupported_orientation_rejected(si_bulk, monkeypatch):
+    import abtem
+    from abtem_tem_backend import simulate_tem_from_atoms
+    from ase.utils import rotate
+    before = si_bulk.copy()
+    monkeypatch.setattr(abtem, 'Potential', lambda *a, **k: pytest.fail('unsafe Potential created'))
+    with pytest.raises(ValueError, match='not exactly representable'):
+        simulate_tem_from_atoms(si_bulk, view_axes=rotate('10x,5y,0z'),
+                                image_size=48, wave_resolution=48, sampling=.18)
+    for key in before.arrays:
+        np.testing.assert_array_equal(si_bulk.arrays[key], before.arrays[key])
+    np.testing.assert_array_equal(si_bulk.cell, before.cell)
+    np.testing.assert_array_equal(si_bulk.pbc, before.pbc)
+    assert si_bulk.info == before.info
