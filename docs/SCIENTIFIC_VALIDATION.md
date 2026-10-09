@@ -11,13 +11,12 @@ The following audit text and its regression tests preserve the original findings
 Production fixes and the supported/rejected scientific policies are now detailed
 in [SCIENTIFIC_RESOLUTION.md](SCIENTIFIC_RESOLUTION.md). QA-01 through QA-08
 have implementation changes, with a conservative exact-periodic limitation.
-The unchanged independent QA suite now has 174 passes and four visible
-contract conflicts; the complete slow/GUI suite has 285 passes, six failures
-and one existing CIF skip. Two failures are original baseline success-path
-fixtures incompatible with the stricter geometry policy. All 46 added
-resolution checks pass. This is **not an all-green validation result**.
-No QA or baseline assertion was changed or suppressed. Human review is required
-for the six documented test/policy conflicts before treating this as merge-ready.
+The 2026-10-09 test-contract reconciliation follows the approved exact-geometry
+policy; see that report for each changed contract and final evidence. The full
+slow/GUI suite now has 294 passes, zero failures and one existing CIF skip.
+Independent QA has 180 passes; all 46 resolution checks pass. Production code,
+numeric tolerances and skip policy are unchanged in this reconciliation.
+The remaining text is the historical pre-fix audit, not current defect status.
 
 ## Result
 

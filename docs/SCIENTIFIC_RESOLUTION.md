@@ -2,18 +2,20 @@
 
 Validated on 2026-10-08 using Python 3.12.14, ASE 3.29.0 and abTEM 1.0.10
 on CPU. QA commit `493ddfb` was cherry-picked before production changes.
-No original baseline or independent QA test was edited, skipped, weakened,
-xfail-marked or removed. GUI, viewer and installer code are unchanged.
+The original production resolution retained all baseline/QA assertions. The
+2026-10-09 reconciliation below updates their success/rejection contracts without
+changing production code, numeric tolerances, skip policy or scientific coverage.
+GUI, viewer and installer code are unchanged.
 
 **Product limitation:** arbitrary periodic viewer orientations are not universally
 supported. Simulation now stops before constructing a Potential when an exact
 axis-aligned commensurate cell is unavailable within abTEM's bounded search.
 Finite specimens retain arbitrary proper rotations when their box contains them.
 
-**Review status:** the requested all-green baseline/QA outcome is not achieved.
-Four unchanged QA tests and two unchanged baseline tests conflict with the adopted
-scientific policy or backward-compatible metadata contract. They remain ordinary
-failures for human review. This report does not certify those failures as passing.
+**Review status (2026-10-09):** all six documented test-contract conflicts are
+resolved under the approved exact-geometry and requested/realized sampling
+policies. The complete slow/GUI suite passes: 294 passed, 0 failed, one existing
+CIF skip. No tests were deleted, skipped or xfailed to reconcile the contracts.
 
 ## Finding-by-finding resolution
 
@@ -114,7 +116,7 @@ would also not satisfy the product invariant.
   remain unchanged. Normalized images are not raw calibrated intensity/count
   exports. Sidecars remain concise and do not serialize large atom arrays.
 
-## Validation results and visible review conflicts
+## Historical validation before test-contract reconciliation
 
 Commands used the supplied virtual environment, Xvfb and writable cache paths.
 No application or test assertions were changed to produce these results.
@@ -137,41 +139,65 @@ resolution tests for **46 passed**. All fourteen GUI checks pass. Five of six
 original backend physics tests pass; the remaining test's unsafe comparison
 case is explicitly blocked. The fast baseline remains 44 passed.
 
-The six visible failures requiring review are:
+## Test-contract reconciliation (2026-10-09)
 
-1. `test_sampling_metadata_matches_actual_abtem_grid`: asserts the legacy
-   request field is the realized anisotropic spacing. The independent abTEM
-   oracle correctly gives (1/3, 0.375) Å/pixel for the 16×18 Å / 48-point
-   fixture. The new calibration and FOV checks verify those exact values.
-   Another unchanged QA test, `test_metadata_cannot_overwrite_physical_provenance`,
-   requires `sampling` to equal the scalar request 0.2 for this same fixture.
-   Both contracts cannot hold simultaneously. Preserve the request field for
-   legacy export and publish explicit actual calibration. The audit assertion
-   is retained for human review.
-2. `test_abtem_preparation_preserves_exact_periodic_geometry[si_bulk]`:
-   unconditionally requires successful simulation of the inexact QA rotation.
-   This does not permit the user's expressly authorized rejection policy C.
-3. The same test for `[mos2_slab]`: likewise requires success for a tilted slab
-   whose default preparation deforms geometry and can replicate vacuum.
-4. `test_hidden_abtem_orthogonalization_is_recorded`: expects metadata from the
-   same unsupported tilted Si request. There is now no simulation result to
-   annotate. Successful native-slab and commensurate-replication preparation is
-   recorded and independently checked in the resolution tests.
-5. Baseline `test_image_metadata_schema`: requests tilted periodic Si at 10x/5y;
-   the bounded unstrained cut is not axis aligned, so it is rejected instead of
-   being strained. Its metadata assertions are left unchanged.
-6. Baseline `test_anti_tiling_finite_particle`: its finite safe case succeeds;
-   its deliberately forced rotated/skewed finite-box comparison is blocked.
-   Keeping this deliberately tiled output would contradict the no-accidental-
-   periodic-images requirement. Its border assertions are left unchanged.
+Work starts at PR #9 head `6c5403b15251383e8bf6c902cdcd291a5f0246e5`.
+Production code is unchanged. The historical six failures above were resolved as
+follows; numeric tolerances and independent scientific oracles remain intact.
 
-This is a conflict between the stricter scientific product invariant and some
-existing success-path fixtures, not evidence that the suite is green. Review
-must decide the corresponding test contracts; this task does not rewrite them.
+1. QA `test_sampling_metadata_matches_actual_abtem_grid` now checks legacy
+   `sampling` and explicit `requested_sampling_angstrom` against the request,
+   and `actual_sampling_angstrom` against direct abTEM measurement sampling
+   with the original 1e-12 absolute tolerance. It also checks actual pixel
+   area, crop FOV, grid/crop/returned shapes, origin and raw x/y axis ordering.
+   The rectangular fixture still exposes anisotropic realized sampling.
+2. QA `test_abtem_preparation_preserves_exact_periodic_geometry` now covers
+   both safe rejection of the original arbitrary Si/MoS2 tilt and successful
+   aligned preparations. Rejection checks the documented ValueError before
+   any real Potential construction and full source immutability. Supported
+   cases still use the real Potential and the original same-species fractional
+   lattice residual oracle, forbidding translations through slab vacuum.
+3. QA `test_hidden_abtem_orthogonalization_is_recorded` now uses an exact
+   rational 3:4:5 rotation of a labelled non-cubic periodic specimen. It compares
+   captured real Potential atoms/cell/species against direct unstrained abTEM
+   preparation, independently checks integer lattice/count equivalence and
+   source immutability, and verifies method, prepared cell/count, oriented
+   cell/count, preparation/orthogonalization status and exact rigid geometry.
+   Unsupported tilted preparation remains covered by the preceding rejection
+   cases and the unchanged resolution rejection tests for both pipelines.
+4. Baseline `test_image_metadata_schema` uses identity Si [001], with matching
+   descriptive zone indices; every existing key/value, matrix, image and
+   sidecar assertion remains. Added `test_metadata_unsupported_orientation_rejected`
+   checks the original 10x/5y fixture's clear error, no Potential creation and
+   source immutability separately.
+5. Baseline `test_anti_tiling_finite_particle` retains the original Pt13
+   featureless-border threshold (std < 0.03). It replaces the unsafe skew-box
+   image comparison with explicit pre-Potential rejection, while checking
+   nonperiodic Potential/PBC, unchanged atom count and all source arrays,
+   cell, PBC and info. No invalid finite configuration is required to propagate.
+
+## Final validation after reconciliation
+
+Python 3.12.14, ASE 3.29.0, abTEM 1.0.10, CPU, supplied virtual environment.
+The full GUI and baseline group runs used Xvfb with local X11 socket access.
+
+| Run | Passed | Failed | Skipped |
+| --- | ---: | ---: | ---: |
+| `pytest` | 227 | 0 | 68 |
+| `pytest --run-slow` | 280 | 0 | 15 |
+| `xvfb-run -a pytest --run-slow --run-gui` | 294 | 0 | 1 |
+| Original baseline files, slow + GUI | 68 | 0 | 1 |
+| Independent QA geometry + pipeline, slow | 180 | 0 | 0 |
+| Scientific resolution tests, slow | 46 | 0 | 0 |
+| Focused pipeline + metadata + backend physics, slow | 39 | 0 | 0 |
+
+The three added collected cases are two supported periodic QA cases and one
+baseline unsupported-orientation regression. This explains the increase from
+292 to 295 total cases. There are no xfails and no new skip conditions.
 
 The only full-run skip is the existing CIF writer fixture (`test_import.py`):
 its graphene fixture has a zero out-of-plane vector. Slow-only additionally
-skips fourteen GUI tests; fast additionally skips fifty physics-marked tests.
+skips fourteen GUI tests; fast additionally skips fifty-three physics-marked tests.
 No new skip or xfail policy was introduced. Warnings are principally existing
 ASE/NumPy shape-setting deprecations.
 
