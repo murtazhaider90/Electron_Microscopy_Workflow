@@ -27,22 +27,29 @@ def test_image_finite_and_saved(pt13, tmp_path):
 
 
 @pytest.mark.slow
-def test_anti_tiling_finite_particle(pt13):
-    """HARD GATE (the flagged 'duplicated particles' bug): a finite particle
-    in vacuum must leave the frame border featureless (no tiled copies), and
-    doing so must clearly beat the forced-periodic case."""
+def test_anti_tiling_finite_particle(pt13, monkeypatch):
+    """HARD GATE: finite Pt stays in one box with a featureless vacuum border;
+    a forced skew calculation box must be rejected before Potential creation."""
+    import abtem
     from abtem_tem_backend import simulate_tem_from_atoms
     from ase.utils import rotate
+    before = pt13.copy()
     kw = dict(view_axes=rotate("20x,15y,0z"), image_size=200, wave_resolution=200,
               sampling=0.12, dose=1e6)
-    img_finite, _ = simulate_tem_from_atoms(pt13, rotate_cell=False, **kw)
-    img_periodic, _ = simulate_tem_from_atoms(pt13, rotate_cell=True, **kw)
+    img_finite, meta = simulate_tem_from_atoms(pt13, rotate_cell=False, **kw)
     s_fin = _border_std(img_finite)
-    s_per = _border_std(img_periodic)
-    # 1) correct finite output: vacuum border essentially flat
     assert s_fin < 0.03, f"finite border std {s_fin:.4f} too high (tiling?)"
-    # 2) the metric genuinely discriminates: tiling fills the border
-    assert s_per > 3 * s_fin, f"no separation: finite {s_fin:.4f} periodic {s_per:.4f}"
+    assert meta['preparation']['potential_periodic'] is False
+    assert meta['preparation']['pbc'] == [False, False, False]
+    assert meta['preparation']['prepared_atom_count'] == len(pt13)
+    monkeypatch.setattr(abtem, 'Potential', lambda *a, **k: pytest.fail('unsafe Potential created'))
+    with pytest.raises(ValueError, match='axis-aligned calculation box'):
+        simulate_tem_from_atoms(pt13, rotate_cell=True, **kw)
+    for key in before.arrays:
+        np.testing.assert_array_equal(pt13.arrays[key], before.arrays[key])
+    np.testing.assert_array_equal(pt13.cell, before.cell)
+    np.testing.assert_array_equal(pt13.pbc, [False, False, False])
+    assert pt13.info == before.info
 
 
 @pytest.mark.slow

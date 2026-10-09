@@ -1,7 +1,6 @@
-"""Independent abTEM and statistical oracles, including unresolved regressions.
+"""Independent abTEM/statistical oracles for the exact-geometry policy.
 
-Confirmed issues are ordinary failing tests, deliberately not xfailed. See
-SCIENTIFIC_VALIDATION.md for the distinction between audit and physics fixes.
+See SCIENTIFIC_RESOLUTION.md for supported preparation and rejection contracts.
 """
 import json
 from types import SimpleNamespace
@@ -158,10 +157,22 @@ def test_sampling_metadata_matches_actual_abtem_grid(asymmetric_particle):
     intensity = wave.multislice(abtem.Potential(atoms, gpts=48)).intensity().compute()
     image, meta = be.simulate_tem_from_atoms(atoms, **PARAMS)
     actual_sampling = np.asarray(intensity.sampling)
-    # A consumer would infer FOV from returned pixels and recorded sampling.
-    np.testing.assert_allclose(np.full(2, meta['sampling']), actual_sampling,
-                               atol=1e-12, rtol=0,
-                               err_msg=f'actual crop FOV: {np.array(image.shape)*actual_sampling}')
+    assert meta['sampling'] == PARAMS['sampling']
+    assert meta['requested_sampling_angstrom'] == PARAMS['sampling']
+    assert meta['sampling_semantics'] == 'legacy_requested_real_space_sampling'
+    np.testing.assert_allclose(meta['actual_sampling_angstrom'], actual_sampling,
+                               atol=1e-12, rtol=0)
+    assert meta['pixel_area_angstrom2'] == pytest.approx(np.prod(actual_sampling),
+                                                        abs=1e-12, rel=0)
+    assert meta['measurement_axis_order'] == ['x', 'y']
+    assert meta['returned_axis_order'] == ['x', 'y']
+    assert meta['measurement_shape_xy'] == list(intensity.array.shape)
+    assert meta['crop_shape_xy'] == list(image.shape)
+    assert meta['crop_origin_xy_pixels'] == [0, 0]
+    assert meta['returned_array_shape'] == list(image.shape)
+    np.testing.assert_allclose(meta['field_of_view_angstrom'],
+                               np.array(image.shape)*actual_sampling,
+                               atol=1e-12, rtol=0)
 
 
 @pytest.mark.slow
@@ -218,23 +229,32 @@ def test_invalid_view_rejected_by_both_pipelines(asymmetric_particle, entry):
 
 @pytest.mark.slow
 @pytest.mark.parametrize('specimen', ['si_bulk', 'mos2_slab'])
-def test_abtem_preparation_preserves_exact_periodic_geometry(specimen, request, monkeypatch):
+@pytest.mark.parametrize('supported', [False, True])
+def test_abtem_preparation_preserves_exact_periodic_geometry(specimen, supported, request, monkeypatch):
     """QA-05: inspect the actual abTEM-prepared atoms, beyond the adapter."""
     import abtem
     atoms = request.getfixturevalue(specimen)
     before = snapshot(atoms)
-    axes = rotate('31x,-17y,63z')
+    axes = np.eye(3) if supported else rotate('31x,-17y,63z')
     oriented = direct_work(atoms, axes)
     captured = []
     real_potential = abtem.Potential
 
     def inspect_potential(*args, **kwargs):
+        assert supported, 'unsafe Potential created before rejection'
         potential = real_potential(*args, **kwargs)
         prepared = potential.get_transformed_atoms().copy()
         captured.append(prepared)
         return potential
 
     monkeypatch.setattr(abtem, 'Potential', inspect_potential)
+    if not supported:
+        with pytest.raises(ValueError, match='not exactly representable'):
+            be.simulate_diffraction_from_atoms(atoms, view_axes=axes, voltage=200e3,
+                                               wave_resolution=32, image_size=32)
+        assert not captured, 'unsafe Potential created before rejection'
+        unchanged(atoms, before)
+        return
     be.simulate_diffraction_from_atoms(atoms, view_axes=axes, voltage=200e3,
                                        wave_resolution=32, image_size=32)
     unchanged(atoms, before)
@@ -258,17 +278,50 @@ def test_abtem_preparation_preserves_exact_periodic_geometry(specimen, request, 
 
 
 @pytest.mark.slow
-def test_hidden_abtem_orthogonalization_is_recorded(si_bulk):
-    """QA-06: Potential may transform atoms without the fallback being entered."""
+def test_hidden_abtem_orthogonalization_is_recorded(monkeypatch):
+    """QA-06: record an exact supercell from the actual Potential boundary."""
     import abtem
-    axes = rotate('31x,-17y,63z')
-    oriented = direct_work(si_bulk, axes)
-    potential = abtem.Potential(oriented.copy(), gpts=32)
-    prepared = potential.get_transformed_atoms()
-    assert not np.allclose(prepared.cell.array, oriented.cell.array)
-    _, meta = be.simulate_diffraction_from_atoms(si_bulk, view_axes=axes,
+    # Labelled non-cubic structure prevents symmetry hiding geometric changes.
+    atoms = Atoms('CSiOAl', scaled_positions=[[.1, .2, .3], [.6, .21, .31],
+                                            [.18, .7, .34], [.27, .38, .8]],
+                  cell=[4, 4, 9], pbc=True)
+    before = snapshot(atoms)
+    axes = np.array([[.6, .8, 0], [-.8, .6, 0], [0, 0, 1]])
+    oriented = direct_work(atoms, axes)
+    direct, _ = abtem.orthogonalize_cell(oriented.copy(), allow_transform=False,
+                                        return_transform_matrix=True)
+    captured = []
+    real_potential = abtem.Potential
+
+    def inspect_potential(*args, **kwargs):
+        potential = real_potential(*args, **kwargs)
+        captured.append(potential.get_transformed_atoms().copy())
+        return potential
+
+    monkeypatch.setattr(abtem, 'Potential', inspect_potential)
+    _, meta = be.simulate_diffraction_from_atoms(atoms, view_axes=axes,
                                                  wave_resolution=32, image_size=32)
+    assert len(captured) == 1
+    prepared = captured[0]
+    assert len(prepared) > len(atoms)
+    np.testing.assert_allclose(prepared.cell.array, direct.cell.array, atol=1e-8, rtol=0)
+    np.testing.assert_allclose(prepared.positions, direct.positions, atol=1e-8, rtol=0)
+    np.testing.assert_array_equal(prepared.numbers, direct.numbers)
+    from test_scientific_resolution import assert_lattice_equivalent
+    assert_lattice_equivalent(prepared, oriented)
+    preparation = meta['preparation']
     assert meta['orthogonalized'] is True
+    assert preparation['preparation_occurred'] is True
+    assert preparation['orthogonalization_occurred'] is True
+    assert preparation['exact_rigid_geometry_preserved'] is True
+    assert preparation['method'] == 'abtem_unstrained_commensurate_cut'
+    assert preparation['prepared_atom_count'] == len(prepared)
+    assert preparation['source_oriented_atom_count'] == len(atoms)
+    np.testing.assert_allclose(preparation['prepared_cell_angstrom'], prepared.cell.array,
+                               atol=1e-12, rtol=0)
+    np.testing.assert_allclose(preparation['oriented_cell_angstrom'], oriented.cell.array,
+                               atol=1e-12, rtol=0)
+    unchanged(atoms, before)
 
 
 @pytest.mark.slow
